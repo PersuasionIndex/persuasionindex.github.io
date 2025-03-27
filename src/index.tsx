@@ -4,7 +4,7 @@ import Leaderboard from "./LeaderboardComp"
 
 import "./index.css"
 
-import mockDataPersuasion from "./mocks/results.json"
+import mockDataPersuasion from "./mocks/results_new.json"
 
 const LeaderboardTabs = () => {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);

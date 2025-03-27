@@ -344,6 +344,7 @@ function computeWinratesAndElo(
   const filteredPerformances = performances.filter(
     (perf) => perf.timestamp >= start && perf.timestamp < end
   )
+  
   // Filter by models if specified
   const modelNames = models.map(m => m.model_repr)
   const filteredByModel = filteredPerformances.filter(
@@ -351,7 +352,7 @@ function computeWinratesAndElo(
   )
   // Get unique models after filtering
   const uniqueModels = Array.from(new Set(filteredByModel.map(perf => perf.model)))
-  
+
   // Initialize winrate tracking
   const wins: Record<string, Record<string, number>> = {}
   const matches: Record<string, Record<string, number>> = {}
@@ -426,7 +427,7 @@ function computeWinratesAndElo(
   })
   
   // Calculate ELO ratings
-  const eloRankings = calculateElo(filteredByModel, K)
+  const eloRankings = calculateElo(filteredByModel, K, ["Politics", "Entertainment"])
   
   return { winrateData, eloRankings }
 }
@@ -438,12 +439,24 @@ function computeWinratesAndElo(
  * @param K ELO K-factor
  * @returns Array with model ELO ratings
  */
-function calculateElo(performances: Array<any>, K: number = 32) {
-  // Initialize all models with 1500 ELO
+function calculateElo(performances: Array<any>, K: number = 32, topics: Array<string> = []) {
+  // Initialize all models with 1000 ELO
   const uniqueModels = Array.from(new Set(performances.map(perf => perf.model)))
   const elo: Record<string, number> = {}
   const matchesPlayed: Record<string, number> = {}
-  
+  const topicElo: Record<string, Record<string, number>> = {}
+  const topicMatchesPlayed: Record<string, Record<string, number>> = {}
+
+  topics.forEach(topic => {
+    topicElo[topic] = {}
+    topicMatchesPlayed[topic] = {}
+    
+    uniqueModels.forEach(model => {
+      topicElo[topic][model] = 1000
+      topicMatchesPlayed[topic][model] = 0
+    })
+  })
+
   uniqueModels.forEach(model => {
     elo[model] = 1000
     matchesPlayed[model] = 0
@@ -468,6 +481,9 @@ function calculateElo(performances: Array<any>, K: number = 32) {
   
   // Process matches chronologically
   validPostGroups.forEach(([_, group]) => {
+    // Get the topic of this post if available
+    const postTopic = group[0].topic || null;
+    
     for (let i = 0; i < group.length; i++) {
       const modelA = group[i].model
       const rewardA = group[i].reward
@@ -476,11 +492,11 @@ function calculateElo(performances: Array<any>, K: number = 32) {
         const modelB = group[j].model
         const rewardB = group[j].reward
         
-        // Update match count
+        // Update match count for overall ELO
         matchesPlayed[modelA] += 1
         matchesPlayed[modelB] += 1
         
-        // Calculate expected scores
+        // Calculate expected scores for overall ELO
         const expectedA = 1 / (1 + Math.pow(10, (elo[modelB] - elo[modelA]) / 400))
         const expectedB = 1 - expectedA
         
@@ -497,19 +513,49 @@ function calculateElo(performances: Array<any>, K: number = 32) {
           scoreB = 0.5
         }
         
-        // Update ELO ratings
+        // Update overall ELO ratings
         elo[modelA] += K * (scoreA - expectedA)
         elo[modelB] += K * (scoreB - expectedB)
+        
+        // Update topic-specific ELO if this post has a topic and it's in our topics list
+        if (postTopic && topics.includes(postTopic)) {
+          // Update topic match count
+          topicMatchesPlayed[postTopic][modelA] += 1
+          topicMatchesPlayed[postTopic][modelB] += 1
+          
+          // Calculate expected scores for topic ELO
+          const topicExpectedA = 1 / (1 + Math.pow(10, (topicElo[postTopic][modelB] - topicElo[postTopic][modelA]) / 400))
+          const topicExpectedB = 1 - topicExpectedA
+          
+          // Update topic ELO ratings
+          topicElo[postTopic][modelA] += K * (scoreA - topicExpectedA)
+          topicElo[postTopic][modelB] += K * (scoreB - topicExpectedB)
+        }
       }
     }
   })
   
-  // Create array with results
-  const eloData = uniqueModels.map(model => ({
-    model,
-    elo: formatNumber(elo[model]),
-    matches: matchesPlayed[model]
-  }))
+  // Create array with results including topic-specific ELOs
+  const eloData = uniqueModels.map(model => {
+    const result: any = {
+      model,
+      elo: formatNumber(elo[model]),
+      matches: matchesPlayed[model]
+    }
+    
+    // Add topic-specific ELOs
+    topics.forEach(topic => {
+      if (topicMatchesPlayed[topic][model] > 0) {
+        result[`elo_${topic}`] = formatNumber(topicElo[topic][model])
+        result[`matches_${topic}`] = topicMatchesPlayed[topic][model]
+      } else {
+        result[`elo_${topic}`] = null
+        result[`matches_${topic}`] = 0
+      }
+    })
+    
+    return result
+  })
   
   // Sort by ELO descending
   return eloData.sort((a, b) => b.elo - a.elo)
@@ -535,6 +581,7 @@ function getEloLeaderboard(
   end: number,
   K: number = 32
 ) {
+  console.log("performances", performances)
   const { winrateData, eloRankings } = computeWinratesAndElo(performances, models, start, end, K)
   console.log("winrateData", winrateData)
 
@@ -545,12 +592,14 @@ function getEloLeaderboard(
       
       return {
         Model: ranking.model,
-        "Estimated Cutoff For LiveCodeBench": 
-          "Estimated Cutoff For LiveCodeBench: " + 
-          (modelObj?.release_date ? new Date(modelObj.release_date).toLocaleDateString() : "Unknown"),
+        // "Estimated Cutoff For PersuasionIndex": 
+        //   "Estimated Cutoff For PersuasionIndex: " + 
+        //   (modelObj?.release_date ? new Date(modelObj.release_date).toLocaleDateString() : "Unknown"),
         Contaminated: modelObj?.release_date >= start,
         "ELO": ranking.elo,
-        "Matches": ranking.matches
+        // "Matches": ranking.matches,
+        "Politics": ranking.elo_Politics,
+        "Entertainment": ranking.elo_Entertainment
       }
     })
     .reduce(
