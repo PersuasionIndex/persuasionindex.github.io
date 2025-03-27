@@ -216,7 +216,8 @@ function getDateMarksFromModels(models: Array<any>) {
 function getDateMarksFromTimestamps(timestamps: Array<number>) {
   return timestamps.map((timestamp) => ({
     value: timestamp,
-    label: new Date(timestamp).toLocaleDateString(undefined, {
+    // Convert seconds to milliseconds if needed (timestamp < 10000000000)
+    label: new Date(timestamp < 10000000000 ? timestamp * 1000 : timestamp).toLocaleDateString(undefined, {
       timeZone: "UTC",
     }),
   }))
@@ -322,4 +323,263 @@ function getColumnDefs(columnNames: Array<string>, modelsDict: any) {
     .filter((columnDef) => columnDef !== null)
 }
 
-export { getDateMarksFromTimestamps, getLeaderboard, getColumnDefs }
+/**
+ * Compute winrates between models and calculate ELO rankings.
+ * 
+ * @param performances Array of performance results
+ * @param models Array of model objects
+ * @param start Start timestamp for filtering
+ * @param end End timestamp for filtering
+ * @param K ELO K-factor (default 32)
+ * @returns Object with winrate data and ELO rankings
+ */
+function computeWinratesAndElo(
+  performances: Array<any>,
+  models: Array<any>,
+  start: number,
+  end: number,
+  K: number = 32
+) {
+  // Filter by date range
+  const filteredPerformances = performances.filter(
+    (perf) => perf.timestamp >= start && perf.timestamp < end
+  )
+  // Filter by models if specified
+  const modelNames = models.map(m => m.model_repr)
+  const filteredByModel = filteredPerformances.filter(
+    (perf) => modelNames.includes(perf.model)
+  )
+  // Get unique models after filtering
+  const uniqueModels = Array.from(new Set(filteredByModel.map(perf => perf.model)))
+  
+  // Initialize winrate tracking
+  const wins: Record<string, Record<string, number>> = {}
+  const matches: Record<string, Record<string, number>> = {}
+  
+  uniqueModels.forEach(model => {
+    wins[model] = {}
+    matches[model] = {}
+    uniqueModels.forEach(opponent => {
+      if (opponent !== model) {
+        wins[model][opponent] = 0
+        matches[model][opponent] = 0
+      }
+    })
+  })
+  
+  // Group by post_id to compare models on same posts
+  const postGroups: Record<string, Array<any>> = {}
+  filteredByModel.forEach(perf => {
+    if (!postGroups[perf.id]) {
+      postGroups[perf.id] = []
+    }
+    postGroups[perf.id].push(perf)
+  })
+  
+  // Compare each pair of models
+  Object.values(postGroups).forEach(group => {
+    // Only consider posts with multiple models
+    if (group.length < 2) return
+    
+    for (let i = 0; i < group.length; i++) {
+      const modelA = group[i].model
+      const rewardA = group[i].reward
+      
+      for (let j = i + 1; j < group.length; j++) {
+        const modelB = group[j].model
+        const rewardB = group[j].reward
+        
+        matches[modelA][modelB] += 1
+        matches[modelB][modelA] += 1
+        
+        if (rewardA > rewardB) {
+          wins[modelA][modelB] += 1
+        } else if (rewardB > rewardA) {
+          wins[modelB][modelA] += 1
+        } else { // Tie
+          wins[modelA][modelB] += 0.5
+          wins[modelB][modelA] += 0.5
+        }
+      }
+    }
+  })
+  
+  // Calculate winrates
+  const winrateData: Array<{
+    model: string,
+    opponent: string,
+    winrate: number,
+    matches: number
+  }> = []
+  
+  uniqueModels.forEach(model => {
+    uniqueModels.forEach(opponent => {
+      if (model !== opponent && matches[model][opponent] > 0) {
+        winrateData.push({
+          model,
+          opponent,
+          winrate: formatNumber(wins[model][opponent] / matches[model][opponent]),
+          matches: matches[model][opponent]
+        })
+      }
+    })
+  })
+  
+  // Calculate ELO ratings
+  const eloRankings = calculateElo(filteredByModel, K)
+  
+  return { winrateData, eloRankings }
+}
+
+/**
+ * Calculate ELO ratings for models based on pairwise comparisons.
+ * 
+ * @param performances Array of performance results
+ * @param K ELO K-factor
+ * @returns Array with model ELO ratings
+ */
+function calculateElo(performances: Array<any>, K: number = 32) {
+  // Initialize all models with 1500 ELO
+  const uniqueModels = Array.from(new Set(performances.map(perf => perf.model)))
+  const elo: Record<string, number> = {}
+  const matchesPlayed: Record<string, number> = {}
+  
+  uniqueModels.forEach(model => {
+    elo[model] = 1000
+    matchesPlayed[model] = 0
+  })
+  
+  // Group by post_id to compare models on same posts
+  const postGroups: Record<string, Array<any>> = {}
+  performances.forEach(perf => {
+    if (!postGroups[perf.id]) {
+      postGroups[perf.id] = []
+    }
+    postGroups[perf.id].push(perf)
+  })
+  
+  // Filter to only posts with multiple models and sort in a deterministic random order
+  const seed = 42; // Fixed seed for reproducibility
+  const randomGenerator = seededRandom(seed);
+  
+  const validPostGroups = Object.entries(postGroups)
+    .filter(([_, group]) => group.length >= 2)
+    .sort(() => randomGenerator() - 0.5) // Random but deterministic order
+  
+  // Process matches chronologically
+  validPostGroups.forEach(([_, group]) => {
+    for (let i = 0; i < group.length; i++) {
+      const modelA = group[i].model
+      const rewardA = group[i].reward
+      
+      for (let j = i + 1; j < group.length; j++) {
+        const modelB = group[j].model
+        const rewardB = group[j].reward
+        
+        // Update match count
+        matchesPlayed[modelA] += 1
+        matchesPlayed[modelB] += 1
+        
+        // Calculate expected scores
+        const expectedA = 1 / (1 + Math.pow(10, (elo[modelB] - elo[modelA]) / 400))
+        const expectedB = 1 - expectedA
+        
+        // Determine actual scores
+        let scoreA, scoreB
+        if (rewardA > rewardB) {
+          scoreA = 1
+          scoreB = 0
+        } else if (rewardB > rewardA) {
+          scoreA = 0
+          scoreB = 1
+        } else {
+          scoreA = 0.5
+          scoreB = 0.5
+        }
+        
+        // Update ELO ratings
+        elo[modelA] += K * (scoreA - expectedA)
+        elo[modelB] += K * (scoreB - expectedB)
+      }
+    }
+  })
+  
+  // Create array with results
+  const eloData = uniqueModels.map(model => ({
+    model,
+    elo: formatNumber(elo[model]),
+    matches: matchesPlayed[model]
+  }))
+  
+  // Sort by ELO descending
+  return eloData.sort((a, b) => b.elo - a.elo)
+}
+
+/**
+ * Simple seeded random number generator
+ */
+function seededRandom(seed: number) {
+  return function() {
+    seed = (seed * 9301 + 49297) % 233280;
+    return seed / 233280;
+  };
+}
+
+/**
+ * Get ELO leaderboard data
+ */
+function getEloLeaderboard(
+  performances: Array<any>,
+  models: Array<any>,
+  start: number,
+  end: number,
+  K: number = 32
+) {
+  const { winrateData, eloRankings } = computeWinratesAndElo(performances, models, start, end, K)
+  console.log("winrateData", winrateData)
+
+  console.log("eloRankings", eloRankings)
+  return eloRankings
+    .map(ranking => {
+      const modelObj = models.find(m => m.model_repr === ranking.model)
+      
+      return {
+        Model: ranking.model,
+        "Estimated Cutoff For LiveCodeBench": 
+          "Estimated Cutoff For LiveCodeBench: " + 
+          (modelObj?.release_date ? new Date(modelObj.release_date).toLocaleDateString() : "Unknown"),
+        Contaminated: modelObj?.release_date >= start,
+        "ELO": ranking.elo,
+        "Matches": ranking.matches
+      }
+    })
+    .reduce(
+      (
+        acc: {
+          results: Array<any>
+          rank: number
+        },
+        model
+      ) => {
+        let rank = null
+        if (!model.Contaminated) {
+          rank = acc.rank
+          acc.rank += 1
+        }
+        acc.results.push({
+          Rank: rank,
+          ...model,
+        })
+        return acc
+      },
+      { results: [], rank: 1 }
+    ).results
+}
+
+export { 
+  getDateMarksFromTimestamps, 
+  getLeaderboard, 
+  getColumnDefs,
+  getEloLeaderboard,
+  computeWinratesAndElo
+}

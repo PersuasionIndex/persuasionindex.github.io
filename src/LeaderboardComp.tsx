@@ -19,9 +19,10 @@ import {
   getColumnDefs,
   getDateMarksFromTimestamps,
   getLeaderboard,
+  getEloLeaderboard
 } from "./leaderboardLib"
 
-import "./LeaderboardAgGrid.css"
+
 import styles from "./Leaderboard.module.css"
 const FONT_FAMILY = "'JetBrains Mono', monospace"
 
@@ -29,7 +30,6 @@ const Leaderboard = React.memo(function LeaderboardComponent(props: any) {
   // args from Streamlit
   let args = props.args;
   const { performances, models, date_marks } = args;
-  console.log(performances);
 
   const [isMobileCompressed, setIsMobileCompressed] = useState(window.innerWidth < 768);
 
@@ -59,9 +59,8 @@ const Leaderboard = React.memo(function LeaderboardComponent(props: any) {
     // console.log('Component re-rendered due to changes in date_marks:', date_marks);
     setDateMarks(getDateMarksFromTimestamps(date_marks));
   }, [date_marks]);
-
   const [dateStartAndEnd, setDateStartAndEnd] = React.useState<number[]>([
-    (dateMarks.length > 12) ? dateMarks[15].value : dateMarks[4].value, // Right now, this is 2023-05-01
+    (dateMarks.length > 12) ? dateMarks[15].value : dateMarks[0].value, // Right now, this is 2023-05-01
     dateMarks[dateMarks.length - 1].value,
   ])
 
@@ -73,30 +72,41 @@ const Leaderboard = React.memo(function LeaderboardComponent(props: any) {
     const newValueArray = newValue as number[]
     setDateStartAndEnd(newValueArray)
 
-    const newDf = getLeaderboard(
+    console.log("newValueArray", newValueArray)
+    
+    const newDf = getEloLeaderboard(
       performances,
       models,
       newValueArray[0],
       newValueArray[1]
     )
 
+    console.log("newDf", newDf)
     const newRowData: any[] = []
 
     const res = (gridRef.current as any).api.forEachNode(function (node: any) {
       // Identify by the "Model" field
-      const dfData = newDf.find((row) => row["Model"] === node.data["Model"])!
-
-      const newData = node.data
-      for (const key in dfData) {
-        newData[key] = dfData[key as keyof typeof dfData]
+      const dfData = newDf.find((row) => row["Model"] === node.data["Model"])
+      
+      // Check if model exists in new data
+      if (dfData) {
+        const newData = {...node.data}
+        for (const key in dfData) {
+          newData[key] = dfData[key]
+        }
+        newRowData.push(newData)
       }
-
-      newRowData.push(newData)
     })
 
-    const resTransaction = (gridRef.current as any).api.applyTransaction({
-      update: newRowData,
-    })
+    // Apply transaction only if we have data to update
+    if (newRowData.length > 0) {
+      (gridRef.current as any).api.applyTransaction({
+        update: newRowData,
+      })
+    } else {
+      // If no matching models found, refresh the entire grid
+      setRowData(newDf)
+    }
   }
 
   function dateLabelFormat(value: number) {
@@ -116,7 +126,7 @@ const Leaderboard = React.memo(function LeaderboardComponent(props: any) {
   // )
 
   const leaderboard = useMemo(() => {
-    return getLeaderboard(
+    return getEloLeaderboard(
       performances,
       models,
       dateStartAndEnd[0],
@@ -124,29 +134,29 @@ const Leaderboard = React.memo(function LeaderboardComponent(props: any) {
     );
   }, [performances, models, dateStartAndEnd]);
 
-  if (isMobileCompressed) {
-    // remove columns from leaderboard
-    // remove Easy-Pass@1, Medium-Pass@1, Hard-Pass@1
+  // if (isMobileCompressed) {
+  //   // remove columns from leaderboard
+  //   // remove Easy-Pass@1, Medium-Pass@1, Hard-Pass@1
 
-    // will delete throw error if column not found
+  //   // will delete throw error if column not found
 
-    leaderboard.forEach((row: any) => {
-      delete row["Easy-Pass@1"];
-      delete row["Medium-Pass@1"];
-      delete row["Hard-Pass@1"];
-      delete row["Pass@1 (no COT)"];
-    });
+  //   leaderboard.forEach((row: any) => {
+  //     delete row["Easy-Pass@1"];
+  //     delete row["Medium-Pass@1"];
+  //     delete row["Hard-Pass@1"];
+  //     delete row["Pass@1 (no COT)"];
+  //   });
 
-  }
-  // console.log(leaderboard)
+  // }
+  // // console.log(leaderboard)
 
 
-  const numProblems = performances.filter(
-    (result: any) =>
-      result["model"] === "GPT-4O-2024-05-13" &&
-      result["date"] >= dateStartAndEnd[0] &&
-      result["date"] <= dateStartAndEnd[1]
-  ).length;
+  // const numProblems = performances.filter(
+  //   (result: any) =>
+  //     result["model"] === "GPT-4O-2024-05-13" &&
+  //     result["date"] >= dateStartAndEnd[0] &&
+  //     result["date"] <= dateStartAndEnd[1]
+  // ).length;
 
 
   // df is an array of objects
@@ -223,21 +233,21 @@ const Leaderboard = React.memo(function LeaderboardComponent(props: any) {
   }
 
 
-  let message = `${numProblems} problems selected in the current time window.`;
+  // let message = `${numProblems} problems selected in the current time window.`;
 
-  if (numProblems === 0) {
-    message = "No problems selected in the current time window. Please select a different time window. ";
-  }
-  else if (numProblems < 100) {
-    message += " Less than 100 problems selected. We recommend a larger time-window to get a more accurate leaderboard.";
-  }
-  else {
-    message += "You can change start or end date to change the time window.";
-  }
+  // if (numProblems === 0) {
+  //   message = "No problems selected in the current time window. Please select a different time window. ";
+  // }
+  // else if (numProblems < 100) {
+  //   message += " Less than 100 problems selected. We recommend a larger time-window to get a more accurate ELO ranking.";
+  // }
+  // else {
+  //   message += "You can change start or end date to change the time window.";
+  // }
 
-  message += "<br><br>We estimate cutoff dates based on release date and performance variation. Models highlighted in red are likely contaminated on some fraction of the problems in the given time-window. Feel free to adjust the slider to see the leaderboard at different time windows. Please offer feedback if you find any issues!"
+  let message = "<br><br>We use ELO ratings to rank models based on head-to-head comparisons. Models highlighted in red are likely contaminated on some fraction of the problems in the given time-window. Feel free to adjust the slider to see the leaderboard at different time windows."
 
-  message += "<br><br>Announcements: <br>1. We have made revisions to our official autograder, fixing some unhandled cases. In case you are performing local evaluations, please use the latest codebase. <br>2. We have been introducing larger fraction of difficult problems for the more recent releases in lines with model capability improvements. A drop in performance in the later months is expected."
+  // message += "<br><br>Announcements: <br>1. We have made revisions to our official autograder, fixing some unhandled cases. In case you are performing local evaluations, please use the latest codebase. <br>2. We have been introducing larger fraction of difficult problems for the more recent releases in lines with model capability improvements."
 
 
 
@@ -278,8 +288,7 @@ const Leaderboard = React.memo(function LeaderboardComponent(props: any) {
       </ThemeProvider>
       <div
         style={{
-          display: numProblems === 0 ? "none" : "flex"
-          ,
+          display: "flex",
           flexDirection: "column",
           alignItems: "center",
         }}
