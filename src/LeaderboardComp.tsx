@@ -135,12 +135,12 @@ const Leaderboard = React.memo(function LeaderboardComponent(props: any) {
   // // console.log(leaderboard)
 
 
-  // const numProblems = performances.filter(
-  //   (result: any) =>
-  //     result["model"] === "GPT-4O-2024-05-13" &&
-  //     result["date"] >= dateStartAndEnd[0] &&
-  //     result["date"] <= dateStartAndEnd[1]
-  // ).length;
+  const numProblems = performances.filter(
+    (result: any) =>
+      result["model"] === "gemini-2.0-flash" &&
+      result["timestamp"] >= dateStartAndEnd[0] &&
+      result["timestamp"] <= dateStartAndEnd[1]
+  ).length;
 
 
   // df is an array of objects
@@ -221,19 +221,19 @@ const Leaderboard = React.memo(function LeaderboardComponent(props: any) {
   }
 
 
-  // let message = `${numProblems} problems selected in the current time window.`;
+  let message = `${numProblems} problems selected in the current time window.`;
 
-  // if (numProblems === 0) {
-  //   message = "No problems selected in the current time window. Please select a different time window. ";
-  // }
-  // else if (numProblems < 100) {
-  //   message += " Less than 100 problems selected. We recommend a larger time-window to get a more accurate ELO ranking.";
-  // }
-  // else {
-  //   message += "You can change start or end date to change the time window.";
-  // }
+  if (numProblems === 0) {
+    message = "No problems selected in the current time window. Please select a different time window. ";
+  }
+  else if (numProblems < 100) {
+    message += " Less than 100 problems selected. We recommend a larger time-window to get a more accurate ELO ranking.";
+  }
+  else {
+    message += "<br>You can change start or end date to change the time window.";
+  }
 
-  let message = "<br><br>We use ELO ratings to rank models based on head-to-head comparisons. Models highlighted in red are likely contaminated on some fraction of the problems in the given time-window. Feel free to adjust the slider to see the leaderboard at different time windows."
+  message += "<br><br>We use ELO ratings to rank models based on head-to-head comparisons. Models highlighted in red are likely contaminated on some fraction of the problems in the given time-window. Feel free to adjust the slider to see the leaderboard at different time windows."
 
   // message += "<br><br>Announcements: <br>1. We have made revisions to our official autograder, fixing some unhandled cases. In case you are performing local evaluations, please use the latest codebase. <br>2. We have been introducing larger fraction of difficult problems for the more recent releases in lines with model capability improvements."
 

@@ -472,21 +472,21 @@ function calculateElo(performances: Array<any>, K: number = 32, topics: Array<st
   })
   
   // Filter to only posts with multiple models and sort in a deterministic random order
-  const seed = 37; // Fixed seed for reproducibility
+  const seed = 42; // Fixed seed for reproducibility
   const randomGenerator = seededRandom(seed);
-  
-  // const validPostGroups = Object.entries(postGroups)
-  //   .filter(([_, group]) => group.length >= 2)
-  //   .sort(() => randomGenerator() - 0.5) // Random but deterministic order
   
   const validPostGroups = Object.entries(postGroups)
     .filter(([_, group]) => group.length >= 2)
-    .sort((a, b) => {
-      // Sort by timestamp if available
-      const timestampA = a[1][0].timestamp || 0;
-      const timestampB = b[1][0].timestamp || 0;
-      return timestampA - timestampB;
-    });
+    .sort(() => randomGenerator() - 0.5) // Random but deterministic order
+  
+  // const validPostGroups = Object.entries(postGroups)
+  //   .filter(([_, group]) => group.length >= 2)
+  //   .sort((a, b) => {
+  //     // Sort by timestamp if available
+  //     const timestampA = a[1][0].timestamp || 0;
+  //     const timestampB = b[1][0].timestamp || 0;
+  //     return timestampA - timestampB;
+  //   });
 
   // Process matches chronologically
   validPostGroups.forEach(([_, group]) => {
@@ -506,7 +506,7 @@ function calculateElo(performances: Array<any>, K: number = 32, topics: Array<st
         matchesPlayed[modelB] += 1
         
         // Calculate expected scores for overall ELO
-        const expectedA = 1 / (1 + Math.pow(10, (elo[modelB] - elo[modelA]) / 800))
+        const expectedA = 1 / (1 + Math.pow(10, (elo[modelB] - elo[modelA]) / 400))
         const expectedB = 1 - expectedA
         
         // Determine actual scores
