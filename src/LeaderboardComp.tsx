@@ -71,43 +71,27 @@ const Leaderboard = React.memo(function LeaderboardComponent(props: any) {
   ) => {
     const newValueArray = newValue as number[]
     setDateStartAndEnd(newValueArray)
+  }
 
-    console.log("newValueArray", newValueArray)
+  // Use useEffect to handle grid updates when dateStartAndEnd changes
+  useEffect(() => {
+    // If start equals end, set empty data
+    if (dateStartAndEnd[0] === dateStartAndEnd[1]) {
+      setRowData([]);
+      return;
+    }
     
     const newDf = getEloLeaderboard(
       performances,
       models,
-      newValueArray[0],
-      newValueArray[1]
+      dateStartAndEnd[0],
+      dateStartAndEnd[1]
     )
-
-    console.log("newDf", newDf)
-    const newRowData: any[] = []
-
-    const res = (gridRef.current as any).api.forEachNode(function (node: any) {
-      // Identify by the "Model" field
-      const dfData = newDf.find((row) => row["Model"] === node.data["Model"])
-      
-      // Check if model exists in new data
-      if (dfData) {
-        const newData = {...node.data}
-        for (const key in dfData) {
-          newData[key] = dfData[key]
-        }
-        newRowData.push(newData)
-      }
-    })
-
-    // Apply transaction only if we have data to update
-    if (newRowData.length > 0) {
-      (gridRef.current as any).api.applyTransaction({
-        update: newRowData,
-      })
-    } else {
-      // If no matching models found, refresh the entire grid
-      setRowData(newDf)
-    }
-  }
+    
+    // Simply update the row data state
+    setRowData(newDf);
+    
+  }, [dateStartAndEnd, performances, models]);
 
   function dateLabelFormat(value: number) {
     const index = dateMarks.findIndex((mark) => mark.value === value)
@@ -162,7 +146,11 @@ const Leaderboard = React.memo(function LeaderboardComponent(props: any) {
   // df is an array of objects
   // Get the columns of df
   const columnNames = useMemo(() => {
-    return Object.keys(leaderboard[0])
+    // Check if leaderboard is empty
+    if (!leaderboard || leaderboard.length === 0) {
+      return []; // Return empty array if no data
+    }
+    return Object.keys(leaderboard[0]);
   }, [leaderboard]);
 
   // Object.keys(leaderboard[0])
@@ -188,9 +176,13 @@ const Leaderboard = React.memo(function LeaderboardComponent(props: any) {
     setRowData(leaderboard);
   }, [leaderboard]);
 
-  const [columnDefs, setColumnDefs] = useState(
-    getColumnDefs(columnNames, modelsDict)
-  )
+  const [columnDefs, setColumnDefs] = useState(() => {
+    // Check if columnNames is empty
+    if (columnNames.length === 0) {
+      return []; // Return empty array if no column names
+    }
+    return getColumnDefs(columnNames, modelsDict);
+  })
 
   useEffect(() => {
     // console.log('Component re-rendered due to changes in column:', columnNames, modelsDict);
@@ -215,12 +207,8 @@ const Leaderboard = React.memo(function LeaderboardComponent(props: any) {
 
   const gridStyle = useMemo(
     () => ({
-      height: `${Math.min(42 * rowData.length, 1000)}px`, // Adjust 600 to your desired max height
-      // height: "100%",
+      height: `${rowData && rowData.length > 0 ? Math.min(42 * rowData.length, 1000) : 100}px`, // Default height when empty
       "--ag-font-family": FONT_FAMILY,
-      // minWidth: "760px",
-      // maxWidth: "100%",
-      // height: "1250px",
       overflow: "auto",
       margin: "auto",
     }),
@@ -281,6 +269,7 @@ const Leaderboard = React.memo(function LeaderboardComponent(props: any) {
                 marks={dateMarks}
                 min={dateMarks[0].value}
                 max={dateMarks[dateMarks.length - 1].value}
+                disableSwap
               />
             </Grid>
           </Grid>
